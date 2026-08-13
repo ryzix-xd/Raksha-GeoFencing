@@ -53,7 +53,7 @@ fun MainScreen(viewModel: MainViewModel, onNavigateAdd: () -> Unit, onNavigateSe
             factory = { ctx ->
                 MapView(ctx).apply {
                     getMapAsync { map ->
-                        map.setStyle(Style.Builder().fromUri("https://tiles.openfreemap.org/styles/liberty")) { style ->
+                        map.setStyle(Style.Builder().fromUri("https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json")) { style ->
                             val locationComponent = map.locationComponent
                             locationComponent.activateLocationComponent(
                                 LocationComponentActivationOptions.builder(ctx, style).build()
@@ -62,6 +62,7 @@ fun MainScreen(viewModel: MainViewModel, onNavigateAdd: () -> Unit, onNavigateSe
                                 locationComponent.isLocationComponentEnabled = true
                                 locationComponent.cameraMode = CameraMode.TRACKING
                                 locationComponent.renderMode = RenderMode.COMPASS
+                                locationComponent.zoomWhileTracking(15.0)
                             }
                         }
                         

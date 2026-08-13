@@ -11,19 +11,24 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.app.ActivityCompat
-import com.rohan.raksha.geofence.ui.theme.DarkSpaceNavy
 import com.rohan.raksha.geofence.ui.viewmodel.AddLocationViewModel
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import org.json.JSONArray
 import org.maplibre.android.camera.CameraUpdateFactory
 import org.maplibre.android.geometry.LatLng
 import org.maplibre.android.location.LocationComponentActivationOptions
@@ -32,17 +37,20 @@ import org.maplibre.android.location.modes.RenderMode
 import org.maplibre.android.maps.MapLibreMap
 import org.maplibre.android.maps.MapView
 import org.maplibre.android.maps.Style
-import org.maplibre.android.annotations.MarkerOptions
+import java.net.URL
+import java.net.URLEncoder
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AddLocationScreen(viewModel: AddLocationViewModel, onBack: () -> Unit) {
     var name by remember { mutableStateOf("") }
-    var lat by remember { mutableStateOf("") }
-    var lng by remember { mutableStateOf("") }
+    var searchQuery by remember { mutableStateOf("") }
     var exitRadius by remember { mutableStateOf(100f) }
     var arrRadius by remember { mutableStateOf(100f) }
     var shield by remember { mutableStateOf(false) }
+
+    var mapLibreMap by remember { mutableStateOf<MapLibreMap?>(null) }
+    val scope = rememberCoroutineScope()
 
     val animatedExitRadius by animateFloatAsState(targetValue = exitRadius, animationSpec = tween(300))
     val animatedArrRadius by animateFloatAsState(targetValue = arrRadius, animationSpec = tween(300))
@@ -50,20 +58,13 @@ fun AddLocationScreen(viewModel: AddLocationViewModel, onBack: () -> Unit) {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Add New Location", fontWeight = FontWeight.Bold) },
+                title = { Text("Add Location", fontWeight = FontWeight.Bold) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.Default.ArrowBack, contentDescription = "Back")
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = Color.Transparent
-                ),
-                modifier = Modifier.background(
-                    Brush.verticalGradient(
-                        colors = listOf(DarkSpaceNavy.copy(alpha = 0.9f), Color.Transparent)
-                    )
-                )
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background)
             )
         },
         containerColor = MaterialTheme.colorScheme.background
@@ -72,21 +73,65 @@ fun AddLocationScreen(viewModel: AddLocationViewModel, onBack: () -> Unit) {
             modifier = Modifier
                 .padding(padding)
                 .fillMaxSize()
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 24.dp, vertical = 16.dp)
         ) {
+            // Search Bar
+            OutlinedTextField(
+                value = searchQuery,
+                onValueChange = { searchQuery = it },
+                placeholder = { Text("Search places (e.g. Times Square)") },
+                trailingIcon = {
+                    IconButton(onClick = {
+                        if (searchQuery.isNotEmpty()) {
+                            scope.launch {
+                                val url = "https://nominatim.openstreetmap.org/search?q=${URLEncoder.encode(searchQuery, "UTF-8")}&format=json"
+                                val result = withContext(Dispatchers.IO) {
+                                    try { URL(url).readText() } catch (e: Exception) { null }
+                                }
+                                if (result != null) {
+                                    try {
+                                        val array = JSONArray(result)
+                                        if (array.length() > 0) {
+                                            val obj = array.getJSONObject(0)
+                                            val lat = obj.getString("lat").toDouble()
+                                            val lon = obj.getString("lon").toDouble()
+                                            mapLibreMap?.animateCamera(CameraUpdateFactory.newLatLngZoom(LatLng(lat, lon), 15.0), 1000)
+                                        }
+                                    } catch (e: Exception) {}
+                                }
+                            }
+                        }
+                    }) {
+                        Icon(Icons.Default.Search, contentDescription = "Search")
+                    }
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                shape = RoundedCornerShape(16.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = MaterialTheme.colorScheme.primary,
+                    unfocusedBorderColor = MaterialTheme.colorScheme.surfaceVariant,
+                    focusedContainerColor = MaterialTheme.colorScheme.surface,
+                    unfocusedContainerColor = MaterialTheme.colorScheme.surface
+                ),
+                singleLine = true
+            )
+
+            // Map Box
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(250.dp)
+                    .weight(1f)
+                    .padding(horizontal = 16.dp, vertical = 8.dp)
+                    .shadow(8.dp, RoundedCornerShape(24.dp))
                     .clip(RoundedCornerShape(24.dp))
-                    .background(MaterialTheme.colorScheme.surfaceVariant)
             ) {
                 AndroidView(
                     factory = { ctx ->
                         MapView(ctx).apply {
                             getMapAsync { map ->
-                                map.setStyle(Style.Builder().fromUri("https://tiles.openfreemap.org/styles/liberty")) { style ->
+                                mapLibreMap = map
+                                map.setStyle(Style.Builder().fromUri("https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json")) { style ->
                                     val locationComponent = map.locationComponent
                                     locationComponent.activateLocationComponent(
                                         LocationComponentActivationOptions.builder(ctx, style).build()
@@ -95,129 +140,133 @@ fun AddLocationScreen(viewModel: AddLocationViewModel, onBack: () -> Unit) {
                                         locationComponent.isLocationComponentEnabled = true
                                         locationComponent.cameraMode = CameraMode.TRACKING
                                         locationComponent.renderMode = RenderMode.COMPASS
+                                        locationComponent.zoomWhileTracking(15.0)
                                     }
-                                }
-
-                                map.addOnMapLongClickListener { point ->
-                                    lat = point.latitude.toString()
-                                    lng = point.longitude.toString()
-                                    map.clear()
-                                    map.addMarker(MarkerOptions().position(point).title("Selected Location"))
-                                    true
-                                }
-                                map.addOnMapClickListener { point ->
-                                    lat = point.latitude.toString()
-                                    lng = point.longitude.toString()
-                                    map.clear()
-                                    map.addMarker(MarkerOptions().position(point).title("Selected Location"))
-                                    true
                                 }
                             }
                         }
                     },
                     modifier = Modifier.fillMaxSize()
                 )
+                
+                // Static Center Pin
+                Icon(
+                    imageVector = Icons.Default.LocationOn,
+                    contentDescription = "Center Pin",
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier
+                        .align(Alignment.Center)
+                        .size(48.dp)
+                        .offset(y = (-24).dp) // Offset slightly so bottom points to center
+                )
             }
             
-            Spacer(modifier = Modifier.height(16.dp))
-
-            Card(
-                shape = RoundedCornerShape(24.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(modifier = Modifier.padding(24.dp)) {
-                    Text("Details", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
-                    Spacer(modifier = Modifier.height(16.dp))
-                    
-                    OutlinedTextField(
-                        value = name, onValueChange = { name = it }, 
-                        label = { Text("Location Name") },
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp)
-                    )
-                    Spacer(modifier = Modifier.height(16.dp))
-                    
-                    Text("Latitude: ${lat.take(8)}")
-                    Text("Longitude: ${lng.take(8)}")
-                }
-            }
-            
-            Spacer(modifier = Modifier.height(24.dp))
-            
-            Card(
-                shape = RoundedCornerShape(24.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(modifier = Modifier.padding(24.dp)) {
-                    Text("Configuration", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
-                    Spacer(modifier = Modifier.height(16.dp))
-                    
-                    Text("Exit Radius: ${animatedExitRadius.toInt()}m", color = MaterialTheme.colorScheme.onBackground)
-                    Slider(
-                        value = exitRadius, onValueChange = { exitRadius = it }, 
-                        valueRange = 50f..1000f,
-                        colors = SliderDefaults.colors(
-                            thumbColor = MaterialTheme.colorScheme.primary,
-                            activeTrackColor = MaterialTheme.colorScheme.primary
-                        )
-                    )
-                    
-                    Spacer(modifier = Modifier.height(16.dp))
-                    
-                    Text("Arrival Radius: ${animatedArrRadius.toInt()}m", color = MaterialTheme.colorScheme.onBackground)
-                    Slider(
-                        value = arrRadius, onValueChange = { arrRadius = it }, 
-                        valueRange = 50f..1000f,
-                        colors = SliderDefaults.colors(
-                            thumbColor = MaterialTheme.colorScheme.secondary,
-                            activeTrackColor = MaterialTheme.colorScheme.secondary
-                        )
-                    )
-                    
-                    Spacer(modifier = Modifier.height(16.dp))
-                    
-                    Row(
-                        modifier = Modifier.fillMaxWidth(), 
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column {
-                            Text("Activate Shield", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onBackground)
-                            Text("Turn on when exiting area", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                        Switch(
-                            checked = shield, 
-                            onCheckedChange = { shield = it },
-                            colors = SwitchDefaults.colors(checkedThumbColor = MaterialTheme.colorScheme.primary)
-                        )
-                    }
-                }
-            }
-            
-            Spacer(modifier = Modifier.height(32.dp))
-            
-            Button(
-                onClick = {
-                    viewModel.saveLocation(
-                        name.ifEmpty { "New Location" }, 
-                        lat.toDoubleOrNull() ?: 0.0, 
-                        lng.toDoubleOrNull() ?: 0.0, 
-                        exitRadius, 
-                        arrRadius, 
-                        shield
-                    ) {
-                        onBack()
-                    }
-                },
+            // Details and Settings in Scrollable Column
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(56.dp),
-                shape = RoundedCornerShape(16.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                    .weight(1.2f)
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 16.dp, vertical = 8.dp)
             ) {
-                Text("Save Location", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onPrimary)
+                Card(
+                    shape = RoundedCornerShape(24.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(24.dp)) {
+                        Text("Location Details", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                        Spacer(modifier = Modifier.height(16.dp))
+                        
+                        OutlinedTextField(
+                            value = name, onValueChange = { name = it }, 
+                            label = { Text("Name (e.g. Home, Work)") },
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(12.dp),
+                            singleLine = true
+                        )
+                    }
+                }
+                
+                Spacer(modifier = Modifier.height(16.dp))
+                
+                Card(
+                    shape = RoundedCornerShape(24.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(24.dp)) {
+                        Text("Geofence Radius", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                        Spacer(modifier = Modifier.height(16.dp))
+                        
+                        Text("Exit Radius: ${animatedExitRadius.toInt()}m", color = MaterialTheme.colorScheme.onSurface)
+                        Slider(
+                            value = exitRadius, onValueChange = { exitRadius = it }, 
+                            valueRange = 50f..1000f,
+                            colors = SliderDefaults.colors(
+                                thumbColor = MaterialTheme.colorScheme.primary,
+                                activeTrackColor = MaterialTheme.colorScheme.primary
+                            )
+                        )
+                        
+                        Spacer(modifier = Modifier.height(8.dp))
+                        
+                        Text("Arrival Radius: ${animatedArrRadius.toInt()}m", color = MaterialTheme.colorScheme.onSurface)
+                        Slider(
+                            value = arrRadius, onValueChange = { arrRadius = it }, 
+                            valueRange = 50f..1000f,
+                            colors = SliderDefaults.colors(
+                                thumbColor = MaterialTheme.colorScheme.secondary,
+                                activeTrackColor = MaterialTheme.colorScheme.secondary
+                            )
+                        )
+                        
+                        Spacer(modifier = Modifier.height(16.dp))
+                        
+                        Row(
+                            modifier = Modifier.fillMaxWidth(), 
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("Activate Shield", fontWeight = FontWeight.Bold)
+                                Text("Turn on automatically when exiting", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            Switch(
+                                checked = shield, 
+                                onCheckedChange = { shield = it },
+                                colors = SwitchDefaults.colors(checkedThumbColor = MaterialTheme.colorScheme.primary)
+                            )
+                        }
+                    }
+                }
+                
+                Spacer(modifier = Modifier.height(24.dp))
+                
+                Button(
+                    onClick = {
+                        val target = mapLibreMap?.cameraPosition?.target
+                        val lat = target?.latitude ?: 0.0
+                        val lon = target?.longitude ?: 0.0
+                        viewModel.saveLocation(
+                            name.ifEmpty { "New Location" }, 
+                            lat, lon, 
+                            exitRadius, arrRadius, shield
+                        ) {
+                            onBack()
+                        }
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(56.dp),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                ) {
+                    Text("Save Location", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onPrimary)
+                }
+                Spacer(modifier = Modifier.height(24.dp))
             }
         }
     }

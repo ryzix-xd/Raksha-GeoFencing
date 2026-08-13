@@ -11,6 +11,9 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import com.rohan.raksha.geofence.ui.screen.AddLocationScreen
 import com.rohan.raksha.geofence.ui.screen.DebugScreen
 import com.rohan.raksha.geofence.ui.screen.MainScreen
@@ -33,7 +36,14 @@ class MainActivity : ComponentActivity() {
                 ) {
                     com.rohan.raksha.geofence.util.PermissionsWrapper {
                         val navController = rememberNavController()
-                        NavHost(navController = navController, startDestination = "main") {
+                        NavHost(
+                            navController = navController, 
+                            startDestination = "main",
+                            enterTransition = { slideInHorizontally(animationSpec = tween(300)) { it } },
+                            exitTransition = { slideOutHorizontally(animationSpec = tween(300)) { -it } },
+                            popEnterTransition = { slideInHorizontally(animationSpec = tween(300)) { -it } },
+                            popExitTransition = { slideOutHorizontally(animationSpec = tween(300)) { it } }
+                        ) {
                             composable("main") {
                                 val vm: MainViewModel = viewModel()
                                 MainScreen(
