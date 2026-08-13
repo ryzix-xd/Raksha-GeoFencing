@@ -1,5 +1,9 @@
 package com.rohan.raksha.geofence.ui.screen
 
+import android.Manifest
+import android.content.pm.PackageManager
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -11,12 +15,24 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.app.ActivityCompat
 import com.rohan.raksha.geofence.ui.theme.DarkSpaceNavy
 import com.rohan.raksha.geofence.ui.viewmodel.AddLocationViewModel
+import org.maplibre.android.camera.CameraUpdateFactory
+import org.maplibre.android.geometry.LatLng
+import org.maplibre.android.location.LocationComponentActivationOptions
+import org.maplibre.android.location.modes.CameraMode
+import org.maplibre.android.location.modes.RenderMode
+import org.maplibre.android.maps.MapLibreMap
+import org.maplibre.android.maps.MapView
+import org.maplibre.android.maps.Style
+import org.maplibre.android.annotations.MarkerOptions
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -27,6 +43,9 @@ fun AddLocationScreen(viewModel: AddLocationViewModel, onBack: () -> Unit) {
     var exitRadius by remember { mutableStateOf(100f) }
     var arrRadius by remember { mutableStateOf(100f) }
     var shield by remember { mutableStateOf(false) }
+
+    val animatedExitRadius by animateFloatAsState(targetValue = exitRadius, animationSpec = tween(300))
+    val animatedArrRadius by animateFloatAsState(targetValue = arrRadius, animationSpec = tween(300))
 
     Scaffold(
         topBar = {
@@ -56,6 +75,52 @@ fun AddLocationScreen(viewModel: AddLocationViewModel, onBack: () -> Unit) {
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 24.dp, vertical = 16.dp)
         ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(250.dp)
+                    .clip(RoundedCornerShape(24.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant)
+            ) {
+                AndroidView(
+                    factory = { ctx ->
+                        MapView(ctx).apply {
+                            getMapAsync { map ->
+                                map.setStyle(Style.Builder().fromUri("https://tiles.openfreemap.org/styles/liberty")) { style ->
+                                    val locationComponent = map.locationComponent
+                                    locationComponent.activateLocationComponent(
+                                        LocationComponentActivationOptions.builder(ctx, style).build()
+                                    )
+                                    if (ActivityCompat.checkSelfPermission(ctx, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
+                                        locationComponent.isLocationComponentEnabled = true
+                                        locationComponent.cameraMode = CameraMode.TRACKING
+                                        locationComponent.renderMode = RenderMode.COMPASS
+                                    }
+                                }
+
+                                map.addOnMapLongClickListener { point ->
+                                    lat = point.latitude.toString()
+                                    lng = point.longitude.toString()
+                                    map.clear()
+                                    map.addMarker(MarkerOptions().position(point).title("Selected Location"))
+                                    true
+                                }
+                                map.addOnMapClickListener { point ->
+                                    lat = point.latitude.toString()
+                                    lng = point.longitude.toString()
+                                    map.clear()
+                                    map.addMarker(MarkerOptions().position(point).title("Selected Location"))
+                                    true
+                                }
+                            }
+                        }
+                    },
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+            
+            Spacer(modifier = Modifier.height(16.dp))
+
             Card(
                 shape = RoundedCornerShape(24.dp),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -73,20 +138,8 @@ fun AddLocationScreen(viewModel: AddLocationViewModel, onBack: () -> Unit) {
                     )
                     Spacer(modifier = Modifier.height(16.dp))
                     
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                        OutlinedTextField(
-                            value = lat, onValueChange = { lat = it }, 
-                            label = { Text("Latitude") },
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(12.dp)
-                        )
-                        OutlinedTextField(
-                            value = lng, onValueChange = { lng = it }, 
-                            label = { Text("Longitude") },
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(12.dp)
-                        )
-                    }
+                    Text("Latitude: ${lat.take(8)}")
+                    Text("Longitude: ${lng.take(8)}")
                 }
             }
             
@@ -101,7 +154,7 @@ fun AddLocationScreen(viewModel: AddLocationViewModel, onBack: () -> Unit) {
                     Text("Configuration", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
                     Spacer(modifier = Modifier.height(16.dp))
                     
-                    Text("Exit Radius: ${exitRadius.toInt()}m", color = MaterialTheme.colorScheme.onBackground)
+                    Text("Exit Radius: ${animatedExitRadius.toInt()}m", color = MaterialTheme.colorScheme.onBackground)
                     Slider(
                         value = exitRadius, onValueChange = { exitRadius = it }, 
                         valueRange = 50f..1000f,
@@ -113,7 +166,7 @@ fun AddLocationScreen(viewModel: AddLocationViewModel, onBack: () -> Unit) {
                     
                     Spacer(modifier = Modifier.height(16.dp))
                     
-                    Text("Arrival Radius: ${arrRadius.toInt()}m", color = MaterialTheme.colorScheme.onBackground)
+                    Text("Arrival Radius: ${animatedArrRadius.toInt()}m", color = MaterialTheme.colorScheme.onBackground)
                     Slider(
                         value = arrRadius, onValueChange = { arrRadius = it }, 
                         valueRange = 50f..1000f,

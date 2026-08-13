@@ -1,5 +1,10 @@
 package com.rohan.raksha.geofence.ui.screen
 
+import android.Manifest
+import android.content.pm.PackageManager
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -10,6 +15,8 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.LocationOn
+import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -20,95 +27,162 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.app.ActivityCompat
 import com.rohan.raksha.geofence.data.SavedLocation
 import com.rohan.raksha.geofence.ui.theme.*
 import com.rohan.raksha.geofence.ui.viewmodel.MainViewModel
+import org.maplibre.android.camera.CameraUpdateFactory
+import org.maplibre.android.geometry.LatLng
+import org.maplibre.android.location.LocationComponentActivationOptions
+import org.maplibre.android.location.modes.CameraMode
+import org.maplibre.android.location.modes.RenderMode
 import org.maplibre.android.maps.MapLibreMap
 import org.maplibre.android.maps.MapView
 import org.maplibre.android.maps.Style
+import org.maplibre.android.annotations.MarkerOptions
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainScreen(viewModel: MainViewModel, onNavigateAdd: () -> Unit, onNavigateSettings: () -> Unit) {
     val locations by viewModel.savedLocations.collectAsState()
+    var showBottomSheet by remember { mutableStateOf(true) }
     
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { 
-                    Text(
-                        "Raksha GeoFencing", 
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onBackground
-                    ) 
-                },
-                actions = {
-                    IconButton(onClick = onNavigateSettings) {
-                        Icon(Icons.Default.Settings, contentDescription = "Settings", tint = MaterialTheme.colorScheme.primary)
+    Box(modifier = Modifier.fillMaxSize()) {
+        // Full Screen Map
+        AndroidView(
+            factory = { ctx ->
+                MapView(ctx).apply {
+                    getMapAsync { map ->
+                        map.setStyle(Style.Builder().fromUri("https://tiles.openfreemap.org/styles/liberty")) { style ->
+                            val locationComponent = map.locationComponent
+                            locationComponent.activateLocationComponent(
+                                LocationComponentActivationOptions.builder(ctx, style).build()
+                            )
+                            if (ActivityCompat.checkSelfPermission(ctx, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
+                                locationComponent.isLocationComponentEnabled = true
+                                locationComponent.cameraMode = CameraMode.TRACKING
+                                locationComponent.renderMode = RenderMode.COMPASS
+                            }
+                        }
+                        
+                        // Add markers for saved locations
+                        locations.forEach { loc ->
+                            map.addMarker(
+                                MarkerOptions()
+                                    .position(LatLng(loc.latitude, loc.longitude))
+                                    .title(loc.name)
+                            )
+                        }
                     }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = Color.Transparent
-                ),
-                modifier = Modifier.background(
+                }
+            },
+            modifier = Modifier.fillMaxSize()
+        )
+        
+        // Top Bar Overlay
+        TopAppBar(
+            title = { 
+                Text(
+                    "Raksha GeoFencing", 
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onBackground
+                ) 
+            },
+            actions = {
+                IconButton(onClick = onNavigateSettings) {
+                    Icon(Icons.Default.Settings, contentDescription = "Settings", tint = MaterialTheme.colorScheme.primary)
+                }
+            },
+            colors = TopAppBarDefaults.topAppBarColors(
+                containerColor = Color.Transparent
+            ),
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .background(
                     Brush.verticalGradient(
                         colors = listOf(DarkSpaceNavy.copy(alpha = 0.9f), Color.Transparent)
                     )
                 )
-            )
-        },
-        floatingActionButton = {
-            FloatingActionButton(
-                onClick = onNavigateAdd,
-                containerColor = MaterialTheme.colorScheme.primary,
-                contentColor = MaterialTheme.colorScheme.onPrimary,
-                shape = RoundedCornerShape(16.dp)
-            ) {
-                Icon(Icons.Default.Add, contentDescription = "Add Location")
-            }
-        },
-        containerColor = MaterialTheme.colorScheme.background
-    ) { padding ->
-        Column(modifier = Modifier.fillMaxSize().padding(padding)) {
-            Box(
+        )
+        
+        // Bottom Sheet Overlay
+        Column(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+        ) {
+            Row(
                 modifier = Modifier
-                    .weight(0.45f)
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp)
-                    .clip(RoundedCornerShape(24.dp))
-                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                    .padding(end = 16.dp, bottom = 16.dp),
+                horizontalArrangement = Arrangement.End
             ) {
-                AndroidView(
-                    factory = { ctx ->
-                        MapView(ctx).apply {
-                            getMapAsync { map ->
-                                map.setStyle(Style.Builder().fromUri("https://tiles.openfreemap.org/styles/liberty"))
+                FloatingActionButton(
+                    onClick = { showBottomSheet = !showBottomSheet },
+                    containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                    shape = RoundedCornerShape(16.dp),
+                    modifier = Modifier.padding(end = 16.dp)
+                ) {
+                    Icon(
+                        if (showBottomSheet) Icons.Default.KeyboardArrowDown else Icons.Default.KeyboardArrowUp,
+                        contentDescription = "Toggle Locations"
+                    )
+                }
+                
+                FloatingActionButton(
+                    onClick = onNavigateAdd,
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary,
+                    shape = RoundedCornerShape(16.dp)
+                ) {
+                    Icon(Icons.Default.Add, contentDescription = "Add Location")
+                }
+            }
+
+            AnimatedVisibility(
+                visible = showBottomSheet,
+                enter = slideInVertically(initialOffsetY = { it }),
+                exit = slideOutVertically(targetOffsetY = { it })
+            ) {
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 400.dp),
+                    shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.95f),
+                    shadowElevation = 8.dp
+                ) {
+                    Column(modifier = Modifier.padding(top = 16.dp)) {
+                        Box(
+                            modifier = Modifier
+                                .width(40.dp)
+                                .height(4.dp)
+                                .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f), RoundedCornerShape(2.dp))
+                                .align(Alignment.CenterHorizontally)
+                        )
+                        
+                        Text(
+                            text = "Saved Locations",
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.padding(horizontal = 24.dp, vertical = 16.dp)
+                        )
+                        
+                        LazyColumn(
+                            contentPadding = PaddingValues(horizontal = 16.dp, bottom = 16.dp)
+                        ) {
+                            items(locations) { loc ->
+                                LocationCard(
+                                    location = loc, 
+                                    onToggle = { viewModel.toggleEnabled(loc) }, 
+                                    onDelete = { viewModel.deleteLocation(loc) }
+                                )
+                                Spacer(modifier = Modifier.height(12.dp))
                             }
                         }
-                    },
-                    modifier = Modifier.fillMaxSize()
-                )
-            }
-            
-            Text(
-                text = "Saved Locations",
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onBackground,
-                modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp)
-            )
-            
-            LazyColumn(
-                modifier = Modifier.weight(0.55f).fillMaxWidth(),
-                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)
-            ) {
-                items(locations) { loc ->
-                    LocationCard(
-                        location = loc, 
-                        onToggle = { viewModel.toggleEnabled(loc) }, 
-                        onDelete = { viewModel.deleteLocation(loc) }
-                    )
-                    Spacer(modifier = Modifier.height(12.dp))
+                    }
                 }
             }
         }
@@ -120,25 +194,17 @@ fun LocationCard(location: SavedLocation, onToggle: () -> Unit, onDelete: () -> 
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(
-                    Brush.horizontalGradient(
-                        colors = listOf(
-                            MaterialTheme.colorScheme.surface,
-                            MaterialTheme.colorScheme.surface.copy(alpha = 0.8f)
-                        )
-                    )
-                )
                 .padding(16.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
                 Box(
                     modifier = Modifier
                         .size(48.dp)
@@ -157,7 +223,7 @@ fun LocationCard(location: SavedLocation, onToggle: () -> Unit, onDelete: () -> 
                         text = location.name, 
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onBackground
+                        color = MaterialTheme.colorScheme.onSurface
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
@@ -168,7 +234,7 @@ fun LocationCard(location: SavedLocation, onToggle: () -> Unit, onDelete: () -> 
                 }
             }
             
-            Column(horizontalAlignment = Alignment.End) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
                 Switch(
                     checked = location.isEnabled, 
                     onCheckedChange = { onToggle() },
