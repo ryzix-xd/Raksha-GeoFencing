@@ -31,28 +31,30 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    val navController = rememberNavController()
-                    NavHost(navController = navController, startDestination = "main") {
-                        composable("main") {
-                            val vm: MainViewModel = viewModel()
-                            MainScreen(
-                                viewModel = vm,
-                                onNavigateAdd = { navController.navigate("add") },
-                                onNavigateSettings = { navController.navigate("settings") }
-                            )
-                        }
-                        composable("add") {
-                            val vm: AddLocationViewModel = viewModel()
-                            AddLocationScreen(
-                                viewModel = vm,
-                                onBack = { navController.popBackStack() }
-                            )
-                        }
-                        composable("settings") {
-                            SettingsScreen(onBack = { navController.popBackStack() })
-                        }
-                        composable("debug") {
-                            DebugScreen()
+                    com.rohan.raksha.geofence.util.PermissionsWrapper {
+                        val navController = rememberNavController()
+                        NavHost(navController = navController, startDestination = "main") {
+                            composable("main") {
+                                val vm: MainViewModel = viewModel()
+                                MainScreen(
+                                    viewModel = vm,
+                                    onNavigateAdd = { navController.navigate("add") },
+                                    onNavigateSettings = { navController.navigate("settings") }
+                                )
+                            }
+                            composable("add") {
+                                val vm: AddLocationViewModel = viewModel()
+                                AddLocationScreen(
+                                    viewModel = vm,
+                                    onBack = { navController.popBackStack() }
+                                )
+                            }
+                            composable("settings") {
+                                SettingsScreen(onBack = { navController.popBackStack() })
+                            }
+                            composable("debug") {
+                                DebugScreen()
+                            }
                         }
                     }
                 }
