@@ -99,23 +99,24 @@ jobs:
         run: |
           VER="${{ steps.version.outputs.name }}"
           OUTDIR="app/build/outputs/apk/release"
-          # Gradle splits naming: app-<abi>-release.apk  +  app-universal-release.apk
-          declare -A ABI_LABELS=(
-            ["armeabi-v7a"]="armv7-watch-32bit"
-            ["arm64-v8a"]="arm64-phone-64bit"
-            ["x86_64"]="x86_64-emulator"
-            ["universal"]="universal-all-devices"
-          )
-          for ABI in "${!ABI_LABELS[@]}"; do
-            SRC="$OUTDIR/app-${ABI}-release.apk"
-            if [ -f "$SRC" ]; then
-              DEST="$OUTDIR/Raksha-v${VER}-${ABI_LABELS[$ABI]}.apk"
-              cp "$SRC" "$DEST"
-              echo "Renamed: $SRC → $DEST"
+          echo "--- APKs produced by Gradle ---"
+          find "$OUTDIR" -name "*.apk" | sort
+          COUNT=0
+          while IFS= read -r SRC; do
+            BASENAME=$(basename "$SRC" .apk)
+            # Strip leading "app-" prefix and "-release" suffix
+            LABEL="${BASENAME#app-}"
+            LABEL="${LABEL%-release}"
+            if [ "$LABEL" = "release" ] || [ -z "$LABEL" ]; then
+              LABEL="universal"
             fi
-          done
-          echo "All APKs in $OUTDIR:"
-          ls -lh "$OUTDIR"/Raksha-*.apk
+            DEST="$OUTDIR/Raksha-v${VER}-${LABEL}.apk"
+            cp "$SRC" "$DEST"
+            echo "Renamed: $SRC → $DEST"
+            COUNT=$((COUNT+1))
+          done < <(find "$OUTDIR" -name "app-*-release.apk" -o -name "app-release.apk" | sort)
+          echo "--- Final APKs ($COUNT renamed) ---"
+          find "$OUTDIR" -name "Raksha-*.apk" | sort
 
       # ── 11. Upload artifacts ──────────────────────────────────────────────────
       - name: Upload APK artifacts
