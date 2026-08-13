@@ -1,14 +1,107 @@
-name: Build App
-on: [push, pull_request]
+name: Build Raksha Geo Fencing
+
+on:
+  push:
+    branches:
+      - main
+      - "release/**"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v3
-      - name: Set up JDK 17
-        uses: actions/setup-java@v3
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
         with:
-          java-version: '17'
-          distribution: 'temurin'
-      - name: Build with Gradle
-        run: ./gradlew assembleDebug
+          java-version: "17"
+          distribution: "temurin"
+          cache: gradle
+
+      - name: Verify signing secrets
+        env:
+          KEYSTORE: ${{ secrets.SIGNING_KEYSTORE_B64 }}
+          STORE_PASSWORD: ${{ secrets.SIGNING_STORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.SIGNING_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
+        run: |
+          test -n "$KEYSTORE" || { echo "❌ SIGNING_KEYSTORE_B64 secret is missing. Run setup-signing.yml first."; exit 1; }
+          test -n "$STORE_PASSWORD" || { echo "❌ SIGNING_STORE_PASSWORD secret is missing."; exit 1; }
+          test -n "$KEY_ALIAS" || { echo "❌ SIGNING_KEY_ALIAS secret is missing."; exit 1; }
+          test -n "$KEY_PASSWORD" || { echo "❌ SIGNING_KEY_PASSWORD secret is missing."; exit 1; }
+
+      - name: Restore signing keystore
+        env:
+          KEYSTORE: ${{ secrets.SIGNING_KEYSTORE_B64 }}
+        run: |
+          mkdir -p signing
+          echo "$KEYSTORE" | base64 --decode > signing/raksha-release.jks
+
+      - name: Create signing properties
+        env:
+          STORE_PASSWORD: ${{ secrets.SIGNING_STORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.SIGNING_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
+        run: |
+          cat > signing.properties <<EOF
+          storeFile=signing/raksha-release.jks
+          storePassword=$STORE_PASSWORD
+          keyAlias=$KEY_ALIAS
+          keyPassword=$KEY_PASSWORD
+          EOF
+
+      - name: Make Gradle executable
+        run: chmod +x ./gradlew
+
+      - name: Run unit tests
+        run: ./gradlew test --no-daemon
+
+      - name: Build release APK
+        run: ./gradlew assembleRelease --no-daemon
+
+      - name: Verify APK is signed
+        run: |
+          APK="$(find app/build/outputs/apk/release -name '*.apk' | head -n 1)"
+          test -n "$APK" || { echo "❌ APK not found"; exit 1; }
+          APKSIGNER="$ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -n 1)/apksigner"
+          "$APKSIGNER" verify "$APK"
+          echo "✅ APK verified: $APK"
+
+      - name: Prepare release APK
+        run: |
+          mkdir -p release
+          APK="$(find app/build/outputs/apk/release -name '*.apk' | head -n 1)"
+          cp "$APK" "release/Raksha-GeoFencing-${{ github.run_number }}.apk"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Raksha-GeoFencing-${{ github.run_number }}
+          path: release/*.apk
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: "v1.0.${{ github.run_number }}"
+          name: "Raksha Geo Fencing v1.0.${{ github.run_number }}"
+          generate_release_notes: true
+          files: release/*.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Remove signing files
+        if: always()
+        run: |
+          rm -f signing/raksha-release.jks
+          rm -f signing.properties
