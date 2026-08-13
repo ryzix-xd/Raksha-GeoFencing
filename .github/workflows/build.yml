@@ -1,116 +1,165 @@
-name: Build Raksha Geo Fencing
+name: Build Raksha APK
 
 on:
   push:
-    branches:
-      - main
-      - "release/**"
-  workflow_dispatch:
+    branches: [ "main", "release/**" ]
+    paths-ignore: [ '**.md', '.github/**' ]
+  workflow_dispatch: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: write
 
-concurrency:
-  group: release-${{ github.ref }}
-  cancel-in-progress: true
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   build:
+    name: Build Raksha APK
     runs-on: ubuntu-latest
 
     steps:
+      # ── 1. Checkout ────────────────────────────────────────────────────────────
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: Setup Java
+      # ── 2. JDK 17 ─────────────────────────────────────────────────────────────
+      - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
-          java-version: "17"
-          distribution: "temurin"
-          cache: gradle
+          java-version: '17'
+          distribution: 'temurin'
 
-      - name: Make Gradle executable
-        run: chmod +x ./gradlew
+      # ── 3. Gradle cache ───────────────────────────────────────────────────────
+      - name: Restore Gradle cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/libs.versions.toml') }}
+          restore-keys: ${{ runner.os }}-gradle-
 
-      - name: Check signing secrets
-        id: check_signing
-        env:
-          KEYSTORE: ${{ secrets.SIGNING_KEYSTORE_B64 }}
-          STORE_PASSWORD: ${{ secrets.SIGNING_STORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.SIGNING_KEY_ALIAS }}
-          KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
-        run: |
-          if [ -n "$KEYSTORE" ] && [ -n "$STORE_PASSWORD" ] && [ -n "$KEY_ALIAS" ] && [ -n "$KEY_PASSWORD" ]; then
-            echo "has_signing=true" >> $GITHUB_OUTPUT
-          else
-            echo "has_signing=false" >> $GITHUB_OUTPUT
-            echo "⚠️ Signing secrets not set — building debug APK instead."
-          fi
-
-      - name: Restore signing keystore
-        if: steps.check_signing.outputs.has_signing == 'true'
-        env:
-          KEYSTORE: ${{ secrets.SIGNING_KEYSTORE_B64 }}
+      # ── 4. Signing keystore ───────────────────────────────────────────────────
+      - name: Restore or generate signing keystore
         run: |
           mkdir -p signing
-          echo "$KEYSTORE" | base64 --decode > signing/raksha-release.jks
+          if [ -f signing/signing-key.jks ]; then
+            echo "Using committed keystore: $(wc -c < signing/signing-key.jks) bytes"
+          elif [ -n "${{ secrets.SIGNING_KEYSTORE_B64 }}" ]; then
+            echo "${{ secrets.SIGNING_KEYSTORE_B64 }}" | base64 -d > signing/signing-key.jks
+            echo "Keystore from secret: $(wc -c < signing/signing-key.jks) bytes"
+          else
+            echo "::error::No permanent signing keystore found (missing signing/signing-key.jks and SIGNING_KEYSTORE_B64 secret). Refusing to generate a throwaway key — that would silently break updates for everyone on a previous install. Restore signing/signing-key.jks or set the SIGNING_KEYSTORE_B64 secret, then rerun."
+            exit 1
+          fi
 
-      - name: Create signing properties
-        if: steps.check_signing.outputs.has_signing == 'true'
-        env:
-          STORE_PASSWORD: ${{ secrets.SIGNING_STORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.SIGNING_KEY_ALIAS }}
-          KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
+      # ── 5. local.properties ───────────────────────────────────────────────────
+      - name: Create local.properties
         run: |
-          cat > signing.properties <<EOF
-          storeFile=signing/raksha-release.jks
-          storePassword=$STORE_PASSWORD
-          keyAlias=$KEY_ALIAS
-          keyPassword=$KEY_PASSWORD
-          EOF
+          printf 'signing.storeFile=signing/signing-key.jks\nsigning.storePassword=raksha123\nsigning.keyAlias=raksha\nsigning.keyPassword=raksha123\n' \
+            > local.properties
 
-      - name: Build release APK (signed)
-        if: steps.check_signing.outputs.has_signing == 'true'
-        run: ./gradlew assembleRelease --no-daemon --stacktrace
+      # ── 6. chmod gradlew ──────────────────────────────────────────────────────
+      - name: chmod gradlew
+        run: chmod +x ./gradlew
 
-      - name: Build debug APK (unsigned fallback)
-        if: steps.check_signing.outputs.has_signing == 'false'
-        run: ./gradlew assembleDebug --no-daemon --stacktrace
-
-      - name: Locate APK
-        id: find_apk
+      # ── 7. Auto version bump ──────────────────────────────────────────────────
+      - name: Bump version
         run: |
-          APK=$(find app/build/outputs/apk -name '*.apk' | head -n 1)
-          echo "apk_path=$APK" >> $GITHUB_OUTPUT
-          echo "Found APK: $APK"
+          BUILD=${{ github.run_number }}
+          VER_NAME="1.0.${BUILD}"
+          sed -i "s/versionCode = [0-9]*/versionCode = ${BUILD}/" app/build.gradle.kts
+          sed -i "s/versionName = \"[^\"]*\"/versionName = \"${VER_NAME}\"/" app/build.gradle.kts
+          echo "versionCode → ${BUILD}"
+          echo "versionName → ${VER_NAME}"
 
-      - name: Prepare release directory
+      # ── 8. Build Release APK ──────────────────────────────────────────────────
+      - name: Assemble Release APK
         run: |
-          mkdir -p release
-          cp "${{ steps.find_apk.outputs.apk_path }}" "release/Raksha-GeoFencing-${{ github.run_number }}.apk"
+          set -o pipefail
+          ./gradlew :app:assembleRelease --no-daemon --stacktrace 2>&1 | tee build.log
 
-      - name: Upload artifact
+      # ── 9. Version info ───────────────────────────────────────────────────────
+      - name: Get version info
+        id: version
+        run: |
+          VER=$(grep 'versionName' app/build.gradle.kts | grep -oP '"[^"]+"' | tr -d '"' | head -1)
+          echo "name=$VER"                      >> $GITHUB_OUTPUT
+          echo "apk_name=Raksha-v${VER}.apk"   >> $GITHUB_OUTPUT
+          echo "Version: $VER"
+
+      # ── 10. Rename APKs ───────────────────────────────────────────────────────
+      - name: Rename APKs
+        run: |
+          VER="${{ steps.version.outputs.name }}"
+          OUTDIR="app/build/outputs/apk/release"
+          # Gradle splits naming: app-<abi>-release.apk  +  app-universal-release.apk
+          declare -A ABI_LABELS=(
+            ["armeabi-v7a"]="armv7-watch-32bit"
+            ["arm64-v8a"]="arm64-phone-64bit"
+            ["x86_64"]="x86_64-emulator"
+            ["universal"]="universal-all-devices"
+          )
+          for ABI in "${!ABI_LABELS[@]}"; do
+            SRC="$OUTDIR/app-${ABI}-release.apk"
+            if [ -f "$SRC" ]; then
+              DEST="$OUTDIR/Raksha-v${VER}-${ABI_LABELS[$ABI]}.apk"
+              cp "$SRC" "$DEST"
+              echo "Renamed: $SRC → $DEST"
+            fi
+          done
+          echo "All APKs in $OUTDIR:"
+          ls -lh "$OUTDIR"/Raksha-*.apk
+
+      # ── 11. Upload artifacts ──────────────────────────────────────────────────
+      - name: Upload APK artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: Raksha-GeoFencing-${{ github.run_number }}
-          path: release/*.apk
+          name: Raksha-v${{ steps.version.outputs.name }}-all-apks
+          path: app/build/outputs/apk/release/Raksha-*.apk
           retention-days: 90
 
+      # ── 12. GitHub Release ────────────────────────────────────────────────────
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: "v1.0.${{ github.run_number }}"
-          name: "Raksha Geo Fencing v1.0.${{ github.run_number }}"
+          tag_name: v${{ steps.version.outputs.name }}-build.${{ github.run_number }}
+          name: "Raksha v${{ steps.version.outputs.name }} (Build #${{ github.run_number }})"
           body: |
-            ## Raksha Geo Fencing Build ${{ github.run_number }}
-            
-            > ⚠️ This is a **debug build** (unsigned). Set up signing secrets for a signed release APK.
-            > See README for signing setup instructions.
-          files: release/*.apk
+            ## Raksha v${{ steps.version.outputs.name }} — Automated Release
+
+            **Branch:** `${{ github.ref_name }}` | **Commit:** `${{ github.sha }}`
+            **Package:** `com.rohan.raksha`
+
+            ### APK Downloads — Pick the right one for your device
+
+            | File | Device |
+            |------|--------|
+            | `Raksha-v${{ steps.version.outputs.name }}-armv7-watch-32bit.apk` | Android watches, 32-bit ARM phones |
+            | `Raksha-v${{ steps.version.outputs.name }}-arm64-phone-64bit.apk` | Modern Android phones (64-bit ARM) |
+            | `Raksha-v${{ steps.version.outputs.name }}-x86_64-emulator.apk` | x86 devices, emulators |
+            | `Raksha-v${{ steps.version.outputs.name }}-universal-all-devices.apk` | All devices (larger file) |
+
+            ### Changes in this build
+            - **Always sends SOS** — even when GPS fix is unavailable, message is sent without coordinates
+            - **Guaranteed restart** — listening always resumes after any SOS flow (fix/fail/cancel)
+            - **Watch compatible** — native `LocationManager` fallback when Google Play Services absent
+            - **Keyword sensitivity** — lowered RMS and frame thresholds for short/normal-volume keywords
+
+            ### Install
+            1. Download the APK for your device (see table above)
+            2. Enable **Install from unknown sources** in Settings
+            3. Install and grant Mic, SMS, Location permissions
+            4. Add trusted contacts → Set keyword → Activate
+
+          draft: false
+          prerelease: false
+          files: app/build/outputs/apk/release/Raksha-*.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Remove signing files
-        if: always()
-        run: |
-          rm -f signing/raksha-release.jks signing.properties
