@@ -6,10 +6,10 @@ import androidx.room.*
 @Dao
 interface SavedLocationDao {
     @Query("SELECT * FROM saved_locations")
-    suspend fun getAll(): List<SavedLocation>
+    fun getAll(): kotlinx.coroutines.flow.Flow<List<SavedLocation>>
 
     @Query("SELECT * FROM saved_locations WHERE isEnabled = 1")
-    suspend fun getEnabled(): List<SavedLocation>
+    fun getEnabled(): kotlinx.coroutines.flow.Flow<List<SavedLocation>>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(location: SavedLocation): Long

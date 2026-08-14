@@ -55,25 +55,35 @@ fun MainScreen(viewModel: MainViewModel, onNavigateAdd: () -> Unit, onNavigateSe
                     getMapAsync { map ->
                         map.setStyle(Style.Builder().fromUri("https://api.maptiler.com/maps/hybrid/style.json?key=shkdqB1hzngy8nxGoYMA")) { style ->
                             val locationComponent = map.locationComponent
-                            locationComponent.activateLocationComponent(
-                                LocationComponentActivationOptions.builder(ctx, style).build()
-                            )
+                            val locationEngine = org.maplibre.android.location.engine.LocationEngineProvider.getBestLocationEngine(ctx)
+                            val request = org.maplibre.android.location.engine.LocationEngineRequest.Builder(1000L)
+                                .setPriority(org.maplibre.android.location.engine.LocationEngineRequest.PRIORITY_HIGH_ACCURACY)
+                                .setMaxWaitTime(1000L)
+                                .build()
+                            val activationOptions = LocationComponentActivationOptions.builder(ctx, style)
+                                .locationEngine(locationEngine)
+                                .locationEngineRequest(request)
+                                .build()
+                            locationComponent.activateLocationComponent(activationOptions)
                             if (ActivityCompat.checkSelfPermission(ctx, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
                                 locationComponent.isLocationComponentEnabled = true
                                 locationComponent.cameraMode = CameraMode.TRACKING
-                                locationComponent.renderMode = RenderMode.COMPASS
+                                locationComponent.renderMode = RenderMode.GPS
                                 locationComponent.zoomWhileTracking(15.0)
                             }
                         }
-                        
-                        // Add markers for saved locations
-                        locations.forEach { loc ->
-                            map.addMarker(
-                                MarkerOptions()
-                                    .position(LatLng(loc.latitude, loc.longitude))
-                                    .title(loc.name)
-                            )
-                        }
+                    }
+                }
+            },
+            update = { mapView ->
+                mapView.getMapAsync { map ->
+                    map.clear()
+                    locations.forEach { loc ->
+                        map.addMarker(
+                            MarkerOptions()
+                                .position(LatLng(loc.latitude, loc.longitude))
+                                .title(loc.name)
+                        )
                     }
                 }
             },
