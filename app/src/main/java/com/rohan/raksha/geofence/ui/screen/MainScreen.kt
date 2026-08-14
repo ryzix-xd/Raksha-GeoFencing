@@ -55,13 +55,12 @@ fun MainScreen(viewModel: MainViewModel, onNavigateAdd: () -> Unit, onNavigateSe
                     getMapAsync { map ->
                         map.setStyle(Style.Builder().fromUri("https://api.maptiler.com/maps/hybrid/style.json?key=shkdqB1hzngy8nxGoYMA")) { style ->
                             val locationComponent = map.locationComponent
-                            val locationEngine = org.maplibre.android.location.engine.LocationEngineProvider.getBestLocationEngine(ctx)
                             val request = org.maplibre.android.location.engine.LocationEngineRequest.Builder(1000L)
                                 .setPriority(org.maplibre.android.location.engine.LocationEngineRequest.PRIORITY_HIGH_ACCURACY)
                                 .setMaxWaitTime(1000L)
                                 .build()
                             val activationOptions = LocationComponentActivationOptions.builder(ctx, style)
-                                .locationEngine(locationEngine)
+                                .useDefaultLocationEngine(true)
                                 .locationEngineRequest(request)
                                 .build()
                             locationComponent.activateLocationComponent(activationOptions)
