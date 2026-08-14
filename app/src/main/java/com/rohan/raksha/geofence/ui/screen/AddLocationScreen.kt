@@ -131,7 +131,7 @@ fun AddLocationScreen(viewModel: AddLocationViewModel, onBack: () -> Unit) {
                         MapView(ctx).apply {
                             getMapAsync { map ->
                                 mapLibreMap = map
-                                map.setStyle(Style.Builder().fromUri("https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json")) { style ->
+                                map.setStyle(Style.Builder().fromUri("https://api.maptiler.com/maps/hybrid/style.json?key=shkdqB1hzngy8nxGoYMA")) { style ->
                                     val locationComponent = map.locationComponent
                                     locationComponent.activateLocationComponent(
                                         LocationComponentActivationOptions.builder(ctx, style).build()
